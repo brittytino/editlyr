@@ -4,6 +4,10 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Upload, FileText } from "lucide-react"
 
 export default function SubmissionForm() {
     const router = useRouter()
@@ -17,31 +21,12 @@ export default function SubmissionForm() {
         setLoading(true)
 
         try {
-            // 1. Get Presigned URL
-            const uploadRes = await fetch('/api/proxy/submissions/upload-url', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` }, // Use Proxy or Direct API call? Direct for MVP if CORS allows, usually Proxy via Next.js api routes to hide backend URL issues or auth injection
-                // For Phase 1 MVP, we'll try direct fetch to API_URL if configured, or assume proxy is set up. 
-                // Let's assume we call NEXT_PUBLIC_API_URL or a server action. 
-                // I will implement a direct fetch to the API using public variable for now, or just /api/proxy...
-                // Simplified: Fetching directly to localhost:4000 (needs CORS on API).
-            })
-
-            // Re-eval: Next.js Client Comp calling NestJS API directly needs CORS. 
-            // Better to use Server Action? Or Proxy?
-            // Let's implement a quick Server Action for this form submission to keep it robust and secure.
-
-            // wait, I can just use fetch to absolute URL if CORS is enabled. I'll stick to fetch for now.
-
-            // Step 1: Upload Logic... (Mocked for Phase 1 UI demo as file upload needs S3 configured locally)
-            console.log("Uploading file...", file.name)
-
-            // Step 2: Create Submission
+            // Mock file upload logic for Phase 1
             const formData = new FormData(e.currentTarget)
             const payload = {
                 title: formData.get("title"),
                 abstract: formData.get("abstract"),
-                fileUrl: `https://mock-s3/submissions/${file.name}`, // Mock result
+                fileUrl: `https://mock-s3/submissions/${file.name}`,
             }
 
             const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/submissions`, {
@@ -65,27 +50,80 @@ export default function SubmissionForm() {
     }
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-2">
-                <label className="text-sm font-medium">Title</label>
-                <input name="title" required className="w-full p-2 border rounded-md" placeholder="Article Title" />
-            </div>
+        <form onSubmit={handleSubmit}>
+            <div className="grid gap-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Manuscript Details</CardTitle>
+                        <CardDescription>
+                            Provide the metadata for your submission.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="title">Article Title</Label>
+                            <Input id="title" name="title" required placeholder="e.g. The Effects of..." />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="abstract">Abstract</Label>
+                            <textarea
+                                id="abstract"
+                                name="abstract"
+                                required
+                                className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                placeholder="Paste your abstract here..."
+                            />
+                        </div>
+                    </CardContent>
+                </Card>
 
-            <div className="space-y-2">
-                <label className="text-sm font-medium">Abstract</label>
-                <textarea name="abstract" required className="w-full p-2 border rounded-md h-32" placeholder="Abstract..." />
-            </div>
-
-            <div className="space-y-2">
-                <label className="text-sm font-medium">Manuscript (PDF)</label>
-                <div className="border border-dashed rounded-md p-8 text-center cursor-pointer hover:bg-gray-50">
-                    <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-                </div>
-            </div>
-
-            <div className="flex justify-end gap-4">
-                <Button type="button" onClick={() => router.back()} className="bg-gray-200 text-black hover:bg-gray-300">Cancel</Button>
-                <Button type="submit" disabled={loading}>{loading ? 'Submitting...' : 'Submit Manuscript'}</Button>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>File Upload</CardTitle>
+                        <CardDescription>
+                            Upload your manuscript PDF (anonymized if required).
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="border-2 border-dashed rounded-lg p-10 flex flex-col items-center justify-center text-center hover:bg-muted/50 transition-colors">
+                            <div className="p-4 bg-muted rounded-full mb-4">
+                                <Upload className="h-6 w-6 text-muted-foreground" />
+                            </div>
+                            {file ? (
+                                <div className="flex items-center space-x-2 text-primary font-medium">
+                                    <FileText className="h-4 w-4" />
+                                    <span>{file.name}</span>
+                                    <button type="button" onClick={() => setFile(null)} className="text-muted-foreground hover:text-destructive text-sm ml-2">(remove)</button>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <p className="text-sm font-medium">
+                                        Drag & drop or Click to upload
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        PDF only (max 10MB)
+                                    </p>
+                                    <Input
+                                        id="file-upload"
+                                        type="file"
+                                        accept=".pdf"
+                                        className="hidden"
+                                        onChange={(e) => setFile(e.target.files?.[0] || null)}
+                                    />
+                                    <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
+                                        Select File
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    </CardContent>
+                    <CardFooter className="justify-between">
+                        <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
+                        <Button type="submit" disabled={loading || !file}>
+                            {loading ? 'Submitting...' : 'Submit Manuscript'}
+                        </Button>
+                    </CardFooter>
+                </Card>
             </div>
         </form>
     )

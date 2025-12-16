@@ -1,11 +1,12 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Plan } from '@prisma/client';
-import Stripe from 'stripe';
+import Razorpay = require('razorpay');
+import * as crypto from 'crypto';
 
 @Injectable()
 export class BillingService {
-    private stripe: Stripe;
+    private razorpay: any;
     private readonly LIMITS = {
         [Plan.FREE]: {
             submissions: 5,
@@ -18,9 +19,12 @@ export class BillingService {
     };
 
     constructor(private prisma: PrismaService) {
-        this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_mock', {
-            apiVersion: '2024-11-20.acacia' as any, // Use latest API version available or provided
-        });
+        if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+            this.razorpay = new Razorpay({
+                key_id: process.env.RAZORPAY_KEY_ID,
+                key_secret: process.env.RAZORPAY_KEY_SECRET,
+            });
+        }
     }
 
     async checkSubmissionLimit(journalId: string) {
@@ -58,92 +62,101 @@ export class BillingService {
         }
     }
 
-    // --- Stripe Logic ---
+    // --- Razorpay Logic ---
 
-    async createCheckoutSession(journalId: string, userId: string) {
+    async createSubscription(journalId: string, userId: string) {
+        if (!this.razorpay) throw new BadRequestException('Razorpay credentials not configured');
+
         const journal = await this.prisma.journal.findUnique({
             where: { id: journalId },
             include: { subscription: true }
         });
         if (!journal) throw new NotFoundException('Journal not found');
 
-        // Create Checkout Session
-        const session = await this.stripe.checkout.sessions.create({
-            mode: 'subscription',
-            payment_method_types: ['card'],
-            customer_email: 'admin@' + journal.slug + '.editlyr.org', // Mock or real admin email
-            line_items: [
-                {
-                    price: process.env.STRIPE_PRICE_ID_PRO || 'price_mock_pro',
-                    quantity: 1,
-                },
-            ],
-            success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/settings?success=true`,
-            cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/settings?canceled=true`,
-            metadata: {
-                journalId: journal.id,
-                userId: userId
-            }
-        });
+        // Create a subscription on Razorpay
+        // Note: You must create a Plan in Razorpay Dashboard first and get the plan_id
+        // or check if we can create on the fly. Usually plan_id is fixed env var.
+        const planId = process.env.RAZORPAY_PLAN_ID_PRO || 'plan_mock_pro_id';
 
-        return { url: session.url };
-    }
+        try {
+            const subscription = await this.razorpay.subscriptions.create({
+                plan_id: planId,
+                total_count: 120, // 10 years monthly
+                quantity: 1,
+                customer_notify: 1,
+                notes: {
+                    journalId: journal.id,
+                    userId: userId
+                }
+            });
 
-    async createPortalSession(journalId: string) {
-        const journal = await this.prisma.journal.findUnique({
-            where: { id: journalId },
-            include: { subscription: true }
-        });
-
-        if (!journal?.subscription?.stripeCustomerId) {
-            throw new BadRequestException('No billing account found.');
+            return {
+                subscriptionId: subscription.id,
+                keyId: process.env.RAZORPAY_KEY_ID,
+                journalId: journal.id
+            };
+        } catch (error) {
+            console.error('Razorpay Create Subscription Error:', error);
+            throw new BadRequestException('Failed to initiate subscription');
         }
-
-        const session = await this.stripe.billingPortal.sessions.create({
-            customer: journal.subscription.stripeCustomerId,
-            return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/settings`,
-        });
-
-        return { url: session.url };
     }
 
-    async handleWebhook(signature: string, payload: Buffer) {
-        // Logic to verify signature
-        // const event = this.stripe.webhooks.constructEvent(payload, signature, process.env.STRIPE_WEBHOOK_SECRET);
+    async verifyPayment(razorpaySignature: string, razorpayPaymentId: string, razorpaySubscriptionId: string, journalId: string) {
+        // HmacSHA256(razorpay_payment_id + "|" + razorpay_subscription_id, secret);
+        const generated_signature = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET as string)
+            .update(razorpayPaymentId + "|" + razorpaySubscriptionId)
+            .digest('hex');
 
-        // For MVP without real webhook secret / signature matching (local testing):
-        // We assume the body is the event.
-        const event = JSON.parse(payload.toString());
-
-        if (event.type === 'checkout.session.completed') {
-            const session = event.data.object;
-            const journalId = session.metadata.journalId;
-
+        if (generated_signature === razorpaySignature) {
+            // Payment successful
             await this.prisma.subscription.update({
                 where: { journalId },
                 data: {
-                    stripeCustomerId: session.customer,
-                    stripeSubscriptionId: session.subscription,
+                    razorpaySubscriptionId: razorpaySubscriptionId,
                     plan: Plan.PRO,
                     status: 'active'
                 }
             });
+            return { success: true };
+        } else {
+            throw new BadRequestException('Invalid signature');
+        }
+    }
+
+    // Webhook implementation for handling renewals / cancellations
+    async handleWebhook(body: any, signature: string) {
+        const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+        if (!secret) return; // Skip if not configured
+
+        const expectedSignature = crypto.createHmac('sha256', secret)
+            .update(JSON.stringify(body))
+            .digest('hex');
+
+        if (expectedSignature !== signature) {
+            throw new BadRequestException('Invalid webhook signature');
         }
 
-        if (event.type === 'customer.subscription.deleted') {
-            // Downgrade to free
-            const subscription = event.data.object;
-            // Find subscription by stripe ID
-            const dbSub = await this.prisma.subscription.findFirst({ where: { stripeSubscriptionId: subscription.id } });
-            if (dbSub) {
-                await this.prisma.subscription.update({
-                    where: { id: dbSub.id },
-                    data: {
-                        plan: Plan.FREE,
-                        status: 'canceled'
-                    }
-                });
-            }
+        const event = body.event;
+        const payload = body.payload;
+
+        if (event === 'subscription.charged') {
+            const subId = payload.subscription.entity.id;
+            // Renew logic (usually just ensure it stays active)
+            await this.prisma.subscription.updateMany({
+                where: { razorpaySubscriptionId: subId },
+                data: { status: 'active' }
+            });
+        }
+
+        if (event === 'subscription.cancelled' || event === 'subscription.halted') {
+            const subId = payload.subscription.entity.id;
+            await this.prisma.subscription.updateMany({
+                where: { razorpaySubscriptionId: subId },
+                data: {
+                    status: 'canceled',
+                    plan: Plan.FREE
+                }
+            });
         }
     }
 }

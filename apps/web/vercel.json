@@ -1,0 +1,11 @@
+{
+    "buildCommand": "cd ../.. && npm install && npm run build --workspace=apps/web",
+    "outputDirectory": ".next",
+    "framework": "nextjs",
+    "rewrites": [
+        {
+            "source": "/api/:path*",
+            "destination": "https://your-railway-app.up.railway.app/api/:path*"
+        }
+    ]
+}

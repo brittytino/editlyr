@@ -14,6 +14,8 @@ import { PluginsModule } from './plugins/plugins.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { CommonModule } from './common/common.module';
 
+import { AppController } from './app.controller';
+
 @Module({
     imports: [
         ThrottlerModule.forRoot([{
@@ -32,6 +34,7 @@ import { CommonModule } from './common/common.module';
         PluginsModule,
         BillingModule
     ],
+    controllers: [AppController],
     providers: [
         {
             provide: APP_GUARD,

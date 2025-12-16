@@ -91,8 +91,8 @@ model Subscription {
   id        String   @id @default(uuid())
   plan      Plan     @default(FREE)
   status    String   
-  stripeCustomerId String?
-  stripeSubscriptionId String?
+  razorpayCustomerId String?
+  razorpaySubscriptionId String?
   
   journalId String   @unique
   journal   Journal  @relation(fields: [journalId], references: [id])

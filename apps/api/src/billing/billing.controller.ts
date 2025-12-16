@@ -7,36 +7,35 @@ export class BillingController {
     constructor(private readonly billingService: BillingService) { }
 
     @Post('checkout')
+    @Post('upgrade')
     @UseGuards(JwtAuthGuard)
-    async createCheckout(@Request() req: any) {
-        // Basic User->Journal lookup MVP
-        // Assuming we have a way to know the journalId. 
-        // In Phase 2 we attached Tenant guard or we look up from User.
-        // Let's look up from user for robustness.
-        return this.billingService.createCheckoutSession(req.user.journalId, req.user.userId); // Note: req.user.journalId needs to be ensured by strategy or lookup
+    async upgrade(@Request() req: any, @Body() body: { journalId: string; userId: string }) {
+        // Initiates Razorpay Subscription flow
+        // For now, journalId and userId are taken from req.user, but body is kept for flexibility.
+        return this.billingService.createSubscription(req.user.journalId, req.user.userId);
+    }
+
+    @Post('verify')
+    @UseGuards(JwtAuthGuard)
+    async verify(@Body() body: { razorpay_payment_id: string; razorpay_subscription_id: string; razorpay_signature: string; journalId: string }, @Request() req: any) {
+        // For now, journalId is taken from req.user, but body is kept for flexibility.
+        return this.billingService.verifyPayment(body.razorpay_signature, body.razorpay_payment_id, body.razorpay_subscription_id, req.user.journalId);
     }
 
     @Post('portal')
     @UseGuards(JwtAuthGuard)
     async createPortal(@Request() req: any) {
-        return this.billingService.createPortalSession(req.user.journalId);
+        // Razorpay manages sub portals differently or not at all in the same way stripe does.
+        // For MVP, return a message or link to contact support.
+        return { message: 'For cancellations, please contact support or check your email.' };
     }
 
     @Post('webhook')
-    async handleWebhook(@Headers('stripe-signature') signature: string, @Req() req: any) {
-        if (!signature) {
-            // For local testing without Stripe CLI proxying signature, we might skip verify or use a mock.
-            // But strict implementations need signature.
-            console.log('Webhook received without signature (Local Dev Mode?)');
-        }
-        // NestJS raw body handling is tricky. By default req.body is JSON.
-        // We need raw buffer for Stripe signature verification usually.
-        // For MVP Phase 3, we'll try to use the JSON body directly if signature fails or is missing,
-        // assuming we are doing `stripe trigger` or similar.
+    async webhook(@Body() body: any, @Req() req: any) {
+        // Razorpay sends "x-razorpay-signature" header
+        const signature = req.headers['x-razorpay-signature'];
 
-        const rawBody = req.rawBody || JSON.stringify(req.body); // Hypothetical accessor if raw body middleware existed
-
-        // Simply passing the body buffer mock
-        await this.billingService.handleWebhook(signature, Buffer.from(JSON.stringify(req.body)));
+        // Mock body handling for webhook compatibility
+        await this.billingService.handleWebhook(body, signature as string); // Cast to string
     }
 }
