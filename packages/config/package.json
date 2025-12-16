@@ -1,0 +1,12 @@
+{
+    "name": "@editlyr/config",
+    "version": "0.0.0",
+    "files": [
+        "tailwind.config.ts",
+        "tsconfig.base.json"
+    ],
+    "devDependencies": {
+        "tailwindcss": "^3.3.0",
+        "typescript": "^5.2.0"
+    }
+}

@@ -1,0 +1,188 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // Hashed
+  name      String?
+  roles     Role[]   @default([AUTHOR]) // Simple array of roles for MVP
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  journalId String?
+  journal   Journal? @relation(fields: [journalId], references: [id])
+
+  submissions Submission[]
+  reviews     Review[]
+  auditLogs   AuditLog[]
+}
+
+model Journal {
+  id          String   @id @default(uuid())
+  users       User[]
+  submissions Submission[]
+  
+  name        String
+  slug        String   @unique
+  description String?
+  
+  issn        String?
+  policies    String? // Markdown or JSON
+  reviewModel String   @default("DOUBLE_BLIND") // SINGLE_BLIND, DOUBLE_BLIND, OPEN
+  
+  customDomain String? @unique
+
+  subscription Subscription?
+  stripeId    String?
+
+  plugins     JournalPlugin[]
+  auditLogs   AuditLog[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Plugin {
+  id          String   @id @default(uuid())
+  key         String   @unique // e.g. "pdf-watermark"
+  name        String
+  description String?
+  isPaid      Boolean  @default(false)
+  
+  journals    JournalPlugin[]
+}
+
+model JournalPlugin {
+  id        String   @id @default(uuid())
+  enabled   Boolean  @default(true)
+  config    Json?    // Store plugin specific config
+  
+  journalId String
+  journal   Journal  @relation(fields: [journalId], references: [id])
+  
+  pluginId  String
+  plugin    Plugin   @relation(fields: [pluginId], references: [id])
+  
+  @@unique([journalId, pluginId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String   // e.g. "SUBMISSION_CREATED", "DECISION_MADE"
+  metadata  Json?
+  
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  
+  journalId String
+  journal   Journal  @relation(fields: [journalId], references: [id])
+  
+  createdAt DateTime @default(now())
+}
+
+model Subscription {
+  id        String   @id @default(uuid())
+  plan      Plan     @default(FREE)
+  status    String   
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  
+  journalId String   @unique
+  journal   Journal  @relation(fields: [journalId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+
+model Submission {
+  id          String   @id @default(uuid())
+  title       String
+  abstract    String?
+  status      SubmissionStatus @default(DRAFT)
+  
+  journalId   String
+  journal     Journal @relation(fields: [journalId], references: [id])
+  
+  authorId    String
+  author      User    @relation(fields: [authorId], references: [id])
+  
+  fileUrl     String? // URL to MinIO
+  
+  reviews     Review[]
+  decisions   Decision[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Review {
+  id           String   @id @default(uuid())
+  status       ReviewStatus @default(PENDING)
+  content      String?
+  score        Int?
+  
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id])
+  
+  reviewerId   String
+  reviewer     User       @relation(fields: [reviewerId], references: [id])
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Decision {
+  id           String   @id @default(uuid())
+  status       DecisionStatus
+  notes        String?
+  
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id])
+  
+  editorId     String // ID of the editor who made the decision
+  
+  createdAt    DateTime @default(now())
+}
+
+enum Role {
+  ADMIN
+  EDITOR
+  REVIEWER
+  AUTHOR
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  REVISION_REQUESTED
+  ACCEPTED
+  REJECTED
+  PUBLISHED
+}
+
+enum ReviewStatus {
+  PENDING
+  ACCEPTED     // Invitation accepted
+  DECLINED     // Invitation declined
+  COMPLETED
+}
+
+enum DecisionStatus {
+  ACCEPT
+  REVISION
+  REJECT
+}
